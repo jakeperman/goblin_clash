@@ -23,6 +23,7 @@ class Player(arcade.Sprite):
         self.walk_frame = 0
         self.frame = 0
         self.weapon = None
+        self.should_attack = False
 
     def update(self):
         self.center_x += self.change_x
@@ -54,8 +55,12 @@ class Player(arcade.Sprite):
         self.frame += 1
 
 
-    def attack(self, weapon):
-        pass
+    def attack(self):
+        swing = 10
+        for x in range(10):
+            self.weapon.center_x += 10
+            # self.weapon.draw()
+        self.weapon.angle = 0
 
 
 

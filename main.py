@@ -43,6 +43,8 @@ class Game(arcade.Window):
         self.right_boundary = 0
         self.top_boundary = 0
         self.bottom_boundary = 0
+        self.slash = Slash(SW/2, SH/2)
+
 
     def setup(self):
         self.player = Player(SW / 2, SH / 2, SCALE)
@@ -68,6 +70,13 @@ class Game(arcade.Window):
         self.ground_list.draw()
         self.players.draw()
         self.player.weapon.draw()
+        if self.player.should_attack:
+            self.player.attack()
+            self.player.should_attack = False
+        self.slash.draw()
+
+
+
         # self.dagger.draw()
         # for block in self.ground_list:
         #     block.draw_hit_box(arcade.color.RED, 4)
@@ -88,6 +97,7 @@ class Game(arcade.Window):
             self.player.change_x = 0
 
         # update sprites
+        self.slash.update_animation()
         self.enemies.update()
         self.players.update()
         self.player.update_animation()
@@ -156,6 +166,7 @@ class Game(arcade.Window):
 
     def on_mouse_press(self, x: float, y: float, button: int, modifiers: int):
         # kill goblin if player is within range and attacks
+        self.player.should_attack = True
         for goblin in self.enemies:
             if self.player.left < goblin.left <= self.player.right + 32:
                 self.enemies.remove(goblin)
