@@ -3,17 +3,23 @@ from player import *
 from enemies import *
 from terrain import *
 from items import *
+from debug import *
+import random
+import inspect
 SW, SH = 832, 768
 SCALE = 1
-GRAVITY = 2
+GRAVITY = 1.5
 JUMP_SPEED = 24
 LEFT_VIEW_MARGIN = 350
 RIGHT_VIEW_MARGIN = 350
-TOP_VIEW_MARGIN = 200
-BOTTOM_VIEW_MARGIN = 200
+TOP_VIEW_MARGIN = 300
+BOTTOM_VIEW_MARGIN = 300
 TOP_VIEW_CHANGE = 128
 VIEW_CHANGE = 128
 BLOCK_SCALE = .75
+
+
+
 
 
 class Game(arcade.Window):
@@ -23,17 +29,16 @@ class Game(arcade.Window):
         self.player = None
         self.players = arcade.SpriteList()
         self.enemies = arcade.SpriteList()
-        self.controls = {"a": -3, "d": 3}
+        self.controls = {"a": -5, "d": 5, "w": 5, "s": -5}
         self.jump = 32
         self.ground_list = None
-        self.setup()
         self.keys_pressed = []
-        self.goblin = Goblin(1600, 350)
-        self.goblin.change_y = -GRAVITY
+        self.goblin = Goblin(800, 125)
         self.enemies.append(self.goblin)
-        self.dagger = Dagger(SW/2, SH/2)
+        self.goblin.update_animation()
+        self.dagger = Sword(SW / 2, SH / 2)
         self.hurt_sound = arcade.Sound("resources/sounds/oof.wav")
-        self.current_player = self.hurt_sound.play(1)
+        self.current_player = self.hurt_sound.play(0)
         self.right_view = SW
         self.left_view = 0
         self.top_view = SH
@@ -44,45 +49,69 @@ class Game(arcade.Window):
         self.top_boundary = 0
         self.bottom_boundary = 0
         self.slash = Slash(SW/2, SH/2)
+        self.ladder_list = None
+        self.frame = 0
+        self.setup()
+        self.game_over = False
+        self.debugger = Debugger(self)
+        self.local_debugger = LocalDebugger()
+        self.debug = self.debugger.out
+        self.l_debug = self.local_debugger.out
+        self.debugger.disable()
+        self.local_debugger.disable()
+        self.score = 0
+
+        # self.d = Debug(self)
 
 
     def setup(self):
-        self.player = Player(SW / 2, SH / 2, SCALE)
+        # create the player
+        self.player = Player(1000, 96, SCALE)
         self.players.append(self.player)
+        # self.enemies.append(Goblin(2000, 320))
+        self.enemies.update_animation()
         map_name = "resources/maps/my_map.tmx"  # map file
-        grass = "Grass"  # grass layer name
-        dirt = "Dirt"  # dirt layer name
         # read the map
         level_map = arcade.tilemap.read_tmx(map_name)
-        self.ground_list = arcade.tilemap.process_layer(map_object=level_map, layer_name="ground", scaling=BLOCK_SCALE, use_spatial_hash=True)
+        # generate the tiles for the ground, and for ladders
+        self.ground_list = arcade.tilemap.process_layer(map_object=level_map, layer_name="ground", scaling=BLOCK_SCALE, use_spatial_hash=True, hit_box_algorithm= "Simple")
+        self.ladder_list = arcade.tilemap.process_layer(map_object=level_map, layer_name="ladders", scaling=BLOCK_SCALE, use_spatial_hash=True)
 
-        # self.grass_blocks = arcade.tilemap.process_layer(map_object=level_map, layer_name=grass, scaling=SCALE,
-        #                                                  use_spatial_hash=True)
-        # self.dirt_blocks = arcade.tilemap.process_layer(map_object=level_map, layer_name=dirt, scaling=SCALE)
-
-        self.physics_engine = arcade.PhysicsEnginePlatformer(self.player, self.ground_list, GRAVITY)
+        # setup the physics engine
+        self.physics_engine = arcade.PhysicsEnginePlatformer(self.player, self.ground_list, GRAVITY, ladders=self.ladder_list)
         self.physics_engine.disable_multi_jump()
-        self.player.weapon = Dagger(self.player.right, self.player.center_y)
+        self.enemy_physics_engine = EnemyPhysics(self.enemies, self.player, self.ground_list, 4, ladders=self.ladder_list)
+        # set initial texture
+        self.player.update_animation()
+        # set the players weapon
+        self.player.weapon = Dagger(self.player.right, self.player.center_y, self.player)
+        self.players.disable_spatial_hashing()
 
     def on_draw(self):
         arcade.start_render()
+        arcade.draw_text(f"Score: {self.score}", self.left_view + SW/2 - 10, self.top_view - 50, arcade.color.WHITE, 20)
+        # draw all sprites to screen
+        self.ladder_list.draw()
+        self.player.draw_hit_box(arcade.color.RED, 1)
         self.enemies.draw()
         self.ground_list.draw()
+        if self.player.attacking:
+            self.player.weapon.draw()
         self.players.draw()
-        self.player.weapon.draw()
-        if self.player.should_attack:
-            self.player.attack()
-            self.player.should_attack = False
-        self.slash.draw()
-
-
-
-        # self.dagger.draw()
-        # for block in self.ground_list:
-        #     block.draw_hit_box(arcade.color.RED, 4)
-        # self.player.draw_hit_box(arcade.color.RED, 4)
-
+        if self.game_over:
+            arcade.draw_text("GAME OVER", self.left_view + SW/2 - 100, SH/2, arcade.color.RED, 50)
+        # calculate length of health bar
+        box_len = self.player.hp * 10
+        max_len = self.player.max_hp * 10
+        # self.d.out('max_len')
+        # draw the player's health bar
+        arcade.draw_lrtb_rectangle_filled(self.left_view + 25, self.left_view + 25 + max_len, self.top_view - 17.5,
+                                          self.top_view - 35, arcade.color.WHITE_SMOKE)
+        arcade.draw_lrtb_rectangle_filled(self.left_view + 25, self.left_view + 25 + box_len, self.top_view - 17.5, self.top_view - 35, arcade.color.RED_DEVIL)
+        arcade.draw_text("HP", self.left_view + max_len + 30, self.top_view - 40, arcade.color.BLACK, 20)
     def on_update(self, delta_time: float):
+        if self.frame > 60:
+            self.frame = 0
         # set screen scroll boundaries
         left_boundary = self.left_view + LEFT_VIEW_MARGIN
         right_boundary = self.left_view + SW - RIGHT_VIEW_MARGIN
@@ -90,58 +119,144 @@ class Game(arcade.Window):
         bottom_boundary = self.bottom_view + BOTTOM_VIEW_MARGIN
         changed = False
 
-        # register keypress actions
+
+        for goblin in self.enemies:
+            if not self.player.attacking:
+                goblin.damaged = False
+            if self.player.attacking and arcade.check_for_collision(goblin, self.player.weapon):
+                if not goblin.damaged:
+                    goblin.hp -= 4
+                    goblin.damaged = True
+                print("gob hp:", goblin.hp)
+                self.score += 1
+                break
+            if goblin.hp <= 0:
+                goblin.kill()
+
         if self.keys_pressed:
-            self.player.change_x = self.controls[self.keys_pressed[0]]
+            for key in reversed(self.keys_pressed):
+                # move left/right
+                if key in 'ws':
+                    if self.physics_engine.is_on_ladder():
+                        self.player.change_y = self.controls[key]
+                # move up/down (on ladders)
+                if key in 'ad':
+                    if self.physics_engine.is_on_ladder() and self.player.change_y != 0:
+                        self.player.change_x = self.controls[key] / 10
+                    else:
+                        self.player.change_x = self.controls[key]
         else:
             self.player.change_x = 0
 
+        # check for collision between player and enemies
+        enemies_hit = arcade.check_for_collision_with_list(self.player, self.enemies)
+        if enemies_hit and self.player.hp > 0:
+
+            for goblin in enemies_hit:
+                if self.player.direction == left:
+                    if self.player.left > goblin.center_x and self.player.change_x < 0:
+                        self.player.change_x = 0
+                elif self.player.direction == right:
+                    if self.player.right < goblin.center_x and self.player.change_x > 0:
+                        self.player.change_x = 0
+                if goblin.first_attack:
+                    self.current_player = self.hurt_sound.play(1)
+                    self.player.hp -= 2
+                    goblin.did_damage = True
+                    goblin.first_attack = False
+                elif goblin.can_attack and not goblin.did_damage:
+                    self.current_player = self.hurt_sound.play(1)
+                    self.player.hp -= 2
+                    goblin.did_damage = True
+        # if the player has no HP left, the game is over
+        elif self.player.hp <= 0:
+            self.game_over = True
+
+        # register keypress actions
+
+
         # update sprites
-        self.slash.update_animation()
-        self.enemies.update()
-        self.players.update()
-        self.player.update_animation()
-        self.physics_engine.update()
-        self.player.weapon.center_x = self.player.right
-        self.player.weapon.center_y = self.player.center_y - 10
+        if not self.game_over:
+            self.enemy_physics_engine.update()
+            self.player.update_animation()
+            # self.enemies.update_animation()
+            self.player.update()
+            self.physics_engine.update()
+
 
         # screen scrolling system
-
         # check if player is close enough to edges to scroll screen
         if self.player.left < left_boundary:
             self.left_view -= left_boundary - self.player.left
+            self.right_view = SW + self.left_view
+
             changed = True
         elif self.player.right > right_boundary:
             self.left_view += self.player.right - right_boundary
+            self.right_view = SW + self.left_view
             changed = True
         if self.player.top > top_boundary:
             self.bottom_view += self.player.top - top_boundary
-            print(f"bottom: {self.bottom_view}")
-            print(f"top: {self.top_view}")
+            self.top_view = SH + self.bottom_view
             changed = True
         elif self.player.bottom < bottom_boundary:
             self.bottom_view -= bottom_boundary - self.player.bottom
+            self.top_view = self.bottom_view + SH
             changed = True
-        # prevent the view from going below y=0
+        # prevent the view from going below or to the side of the level
         if self.bottom_view < 0:
             self.bottom_view = 0
+            self.top_view = self.bottom_view + SH
+        elif self.top_view > 1230:
+            self.top_view = 1230
+            self.bottom_view = self.top_view - SH
+        if self.left_view + SW > 2304:
+            self.left_view = 2304 - SW
+            self.right_view = self.left_view + SW
+        elif self.left_view < 0:
+            self.left_view = 0
+            self.right_view = self.left_view +SW
 
         # if view has changed, update the window accordingly
         if changed:
-            arcade.set_viewport(self.left_view, SW + self.left_view, self.bottom_view, SH + self.bottom_view)
+            arcade.set_viewport(self.left_view, self.right_view, self.bottom_view, self.top_view)
 
         # check for collision of player with enemies
-        if arcade.check_for_collision_with_list(self.player, self.enemies):
-            if self.hurt_sound.get_stream_position(self.current_player) == 0:
-                self.current_player = self.hurt_sound.play(1)
+
 
         # enemy physics
         for enemy in self.enemies:
-            if arcade.check_for_collision_with_list(enemy, self.ground_list):
-                enemy.change_y = 0
-                # enemy.center_y += 30
-            else:
-                enemy.change_y = -GRAVITY
+            enemy.attack_timer += 1
+            # prevent enemy from going through the floor
+            # kill enemy if it goes off screen
+            if enemy.left <= 0:
+                enemy.kill()
+            # prevent enemies from spawning off screen
+            if enemy.right >= self.right_view:
+                enemy.right = 2270
+            elif enemy.right >= 2300:
+                # enemy.center_x -= enemy.right - 2270
+                # enemy.right -= 20
+                enemy.base_velocity *= -1
+            # attack the player if the enemy is within range
+            if enemy.left <= self.player.center_x + 80 and enemy.center_y > self.player.center_y - 32:
+                enemy.attack = True
+
+            # set the enemy to target/follow the player
+
+
+        # spawn enemies if they are all killed
+        if not self.enemies:
+            for x in range(50, 100, 50):
+                if arcade.check_for_collision_with_list(self.player, self.ground_list):
+                    new_enemy = Goblin(random.randint(int(self.left_view + 50), int(self.right_view - 50)), self.player.center_y)
+                else:
+                    new_enemy = Goblin(random.randint(int(self.left_view + 50), int(self.right_view - 50)), 125)
+                self.enemies.append(new_enemy)
+                new_enemy.update_animation()
+
+            print(len(self.enemies))
+        self.frame += 1
 
     def on_key_press(self, symbol: int, modifiers: int):
         key = chr(symbol)
@@ -151,7 +266,11 @@ class Game(arcade.Window):
         # if player presses space, and jump conditions are met, jump
         elif symbol == self.jump:
             if self.physics_engine.can_jump():
-                self.physics_engine.jump(JUMP_SPEED)
+                if self.physics_engine.is_on_ladder():
+                    if 0 > self.player.change_x > 0:
+                        self.physics_engine.jump(JUMP_SPEED)
+                else:
+                    self.physics_engine.jump(JUMP_SPEED)
         # print(self.keys_pressed)
         pass
 
@@ -160,21 +279,25 @@ class Game(arcade.Window):
         # removes keys from keys_pressed if they are no longer pressed
         if key in self.keys_pressed:
             self.keys_pressed.remove(key)
+        if key in 'ws':
+            self.player.change_y = 0
         # if symbol == self.jump:
         #     self.player.change_y = 0
             pass
 
     def on_mouse_press(self, x: float, y: float, button: int, modifiers: int):
-        # kill goblin if player is within range and attacks
+        # tell player to attack
         self.player.should_attack = True
-        for goblin in self.enemies:
-            if self.player.left < goblin.left <= self.player.right + 32:
-                self.enemies.remove(goblin)
+        # kill goblin if player is within range and attacks
+
+# x = inspect.getouterframes(inspect.currentframe())[0][0].f_locals
+# print(x['Debugger'].enabled)
 
 
 def main():
     game = Game()
     arcade.run()
+
 
 if __name__ == '__main__':
     main()
